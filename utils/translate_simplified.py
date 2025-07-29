@@ -6,6 +6,7 @@ import time
 import asyncio
 import aiohttp
 import re
+import pandas as pd
 from typing import List, Optional, Dict
 import streamlit as st
 
@@ -57,9 +58,9 @@ COLOR_GLOSSARY: Dict[str, str] = {
     "샌드베이지": "サンドベージュ", "샌드그레이": "サンドグレー", "메탈그레이": "メタルグレー",
     "바샬트그레이": "バサルトグレー", "새틴그레이": "サテングレー", "빈티지그레이": "ヴィンテージグレー",
     "웜그레이": "ウォームグレー", "차콜그레이": "チャコールグレー", "연핑크": "ライトピンク",
-    "인디핑크": "インディピンク", "로투스핑크": "ロータスピンク", "올리브그린": "オリーブグリーン",
-    "포레스트그린": "フォレストグリーン", "민트그린": "ミントグリーン", "틸그린": "ティールグリーン",
-    "스모키올리브": "スモーキーオリーブ", "버터옐로우": "バターイエロー", "연노랑": "ライトイエロー",
+    "인디핑크": "インディピンク", "로투ス핑크": "ロータスピンク", "올리브그린": "オリーブグリーン",
+    "포레ス트그린": "フォレストグリーン", "민트그린": "ミントグリーン", "틸그린": "ティールグリーン",
+    "스모키올리븴": "スモーキーオリーブ", "버터옐로우": "バターイエロー", "연노랑": "ライトイエロー",
     
     # 복합 색상 (고빈도)
     "순백색": "純白", "유백": "乳白", "버터": "バター", "캐럿": "キャロット",
@@ -74,7 +75,22 @@ COLOR_GLOSSARY: Dict[str, str] = {
     
     # 패턴/질감
     "무늬": "柄", "패턴": "パターン", "스트라이프": "ストライプ",
-    "체크": "チェック", "도트": "ドット", "플라워": "フラワー"
+    "체크": "チェック", "도트": "ドット", "플라워": "フラワー",
+    
+    # 자주 사용되는 복합 색상들 추가 (미번역 문제 해결용)
+    "오크화이트": "オークホワイト", "크림화이트": "クリームホワイト",
+    "네추럴피치": "ナチュラルピーチ", "네추럴블루": "ナチュラルブルー",
+    "네추럴멀바우": "ナチュラルメルバウ", "네추럴화이트": "ナチュラルホワイト",
+    "화이트메이플": "ホワイトメープル", "화이트그레이": "ホワイトグレー",
+    "화이트오크": "ホワイトオーク", "다크브라운": "ダークブラウン",
+    "라이트브라운": "ライトブラウン", "딥브라운": "ディープブラウン",
+    "그레이블랙": "グレーブラック", "모카브라운": "モカブラウン",
+    "아이보리메이플": "アイボリーメープル", "워시그린": "ウォッシュグリーン",
+    "블랙아카시아": "ブラックアカシア", "그레이메이플": "グレーメープル",
+    "베이지브라운": "ベージュブラウン", "라이트그레이": "ライトグレー",
+    "페일그레이": "ペールグレー", "다크그레이": "ダークグレー",
+    "연회색": "ライトグレー", "차콜블랙": "チャコールブラック",
+    "무광실버": "マットシルバー", "유광실버": "グロッシーシルバー"
 }
 
 def preprocess_text(text: str) -> str:
@@ -89,6 +105,48 @@ def preprocess_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     
     return text
+
+def validate_deepl_api_key(api_key: str) -> bool:
+    """DeepL API 키 유효성 검증"""
+    if not api_key or not api_key.strip():
+        st.error("API 키가 입력되지 않았습니다.")
+        return False
+    
+    # API 키 형식 검증 (DeepL API 키는 보통 UUID 형태)
+    if len(api_key.strip()) < 20:
+        st.error("API 키 형식이 올바르지 않습니다. DeepL API 키는 최소 20자 이상이어야 합니다.")
+        return False
+    
+    # 간단한 테스트 번역으로 API 키 검증
+    test_url = "https://api-free.deepl.com/v2/translate"
+    test_data = {
+        'auth_key': api_key.strip(),
+        'text': 'test',
+        'target_lang': 'JA'
+    }
+    
+    try:
+        response = requests.post(test_url, data=test_data, timeout=10)
+        
+        if response.status_code == 403:
+            st.error("API 키가 유효하지 않거나 권한이 없습니다.")
+            st.error("DeepL 계정에서 API 키를 다시 확인해주세요.")
+            return False
+        elif response.status_code == 456:
+            st.error("API 사용량 한도를 초과했습니다.")
+            return False
+        elif response.status_code == 200:
+            st.success("✅ API 키가 유효합니다.")
+            return True
+        else:
+            st.warning(f"API 응답 코드: {response.status_code}")
+            return False
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"API 키 검증 중 오류 발생: {str(e)}")
+        return False
+    
+    return False
 
 def translate_with_deepl(text: str, api_key: str, target_lang: str = 'JA') -> Optional[str]:
     """DeepL API를 사용한 단일 텍스트 번역"""
@@ -109,21 +167,30 @@ def translate_with_deepl(text: str, api_key: str, target_lang: str = 'JA') -> Op
     }
     
     try:
-        response = requests.post(url, data=data, timeout=30)
-        response.raise_for_status()
+        response = requests.post(url, data=data, timeout=10)  # 타임아웃 단축
         
-        result = response.json()
-        if 'translations' in result and result['translations']:
-            return result['translations'][0]['text']
+        # 403 에러에 대한 간단한 처리
+        if response.status_code == 403:
+            print(f"번역 API 오류: 403 Forbidden - {preprocessed_text}")
+            return None
         
+        if response.status_code == 200:
+            result = response.json()
+            if 'translations' in result and result['translations']:
+                return result['translations'][0]['text']
+        
+        print(f"번역 API 응답 코드: {response.status_code}")
+        return None
+        
+    except requests.exceptions.Timeout:
+        print(f"번역 API 타임아웃: {preprocessed_text}")
+        return None
     except requests.exceptions.RequestException as e:
-        st.error(f"번역 API 오류: {str(e)}")
+        print(f"번역 API 오류: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"번역 처리 오류: {str(e)}")
+        print(f"번역 처리 오류: {str(e)}")
         return None
-    
-    return None
 
 def translate_batch_with_deepl(texts: List[str], api_key: str, target_lang: str = 'JA', 
                               batch_size: int = 5) -> List[str]:
@@ -146,7 +213,7 @@ def translate_batch_with_deepl(texts: List[str], api_key: str, target_lang: str 
         for text in batch_texts:
             translation = translate_with_deepl(text, api_key, target_lang)
             batch_translations.append(translation if translation else "")
-            time.sleep(0.1)  # API 호출 간격
+            time.sleep(2.0)  # API 호출 간격 (429 에러 방지)
         
         # 결과 저장
         for i, translation in enumerate(batch_translations):
@@ -194,13 +261,28 @@ async def translate_batch_async_with_deepl(texts: List[str], api_key: str,
         }
         
         try:
-            async with session.post(url, data=data) as response:
+            async with session.post(url, data=data, timeout=15) as response:  # 타임아웃 증가
                 if response.status == 200:
                     result = await response.json()
                     if 'translations' in result and result['translations']:
-                        return result['translations'][0]['text']
-        except Exception:
-            pass
+                        translated_text = result['translations'][0]['text']
+                        if translated_text and translated_text.strip():
+                            return translated_text
+                        else:
+                            print(f"빈 번역 결과: '{preprocessed_text}' -> '{translated_text}'")
+                            return ""
+                elif response.status == 403:
+                    print(f"403 Forbidden: '{preprocessed_text}'")
+                    return ""
+                else:
+                    print(f"API 응답 코드 {response.status}: '{preprocessed_text}'")
+                    return ""
+        except asyncio.TimeoutError:
+            print(f"타임아웃: '{preprocessed_text}'")
+            return ""
+        except Exception as e:
+            print(f"비동기 번역 오류 '{preprocessed_text}': {str(e)}")
+            return ""
         
         return ""
     
@@ -225,8 +307,8 @@ async def translate_batch_async_with_deepl(texts: List[str], api_key: str,
             progress_bar.progress(progress)
             status_text.text(f"번역 진행: {current_batch}/{total_batches} 배치 완료")
             
-            # API 호출 간격
-            await asyncio.sleep(0.2)
+            # API 호출 간격 (429 에러 방지를 위해 증가)
+            await asyncio.sleep(2.0)  # 2초로 증가
     
     progress_bar.empty()
     status_text.empty()
@@ -245,95 +327,28 @@ async def translate_product_names(df, target_column: str, api_key: str,
         return translate_batch_with_deepl(texts, api_key, batch_size=batch_size)
 
 def translate_color_with_glossary(color: str, api_key: str, target_lang: str = 'JA') -> str:
-    """용어집을 활용한 색상 번역 (개선된 매칭 로직)"""
+    """용어집을 활용한 색상 번역 (간소화된 버전)"""
     if not color or not color.strip():
         return color
     
     color = color.strip()
     color_lower = color.lower()
     
-    # 1단계: 정확한 매칭 우선 (전체 단어 일치)
+    # 1단계: 정확한 매칭 우선
     if color_lower in COLOR_GLOSSARY:
         return COLOR_GLOSSARY[color_lower]
     
-    # 2단계: 복합 색상 처리 - 길이 순으로 정렬하여 긴 매칭 우선
-    sorted_glossary = sorted(COLOR_GLOSSARY.items(), key=lambda x: len(x[0]), reverse=True)
-    
-    for korean, japanese in sorted_glossary:
-        korean_lower = korean.lower()
-        
-        # 정확한 단어 경계 매칭 (예: "화이트"는 "크림화이트"와 매칭되지 않음)
-        if korean_lower == color_lower:
+    # 2단계: 부분 매칭 (간소화)
+    for korean, japanese in COLOR_GLOSSARY.items():
+        if korean.lower() in color_lower:
             return japanese
-        
-        # 복합 색상 처리: 수식어 + 기본색상
-        # 예: "다크블루", "라이트그레이", "크림화이트" 등
-        modifiers = ["다크", "라이트", "딥", "소프트", "크림", "메이플", "아이스", "펄", "매트",
-                    "오크", "아카시아", "월넛", "멀바우", "엘다", "고무나무", "삼나무", "참죽",
-                    "내추럴", "네추럴", "워시", "빈티지", "엔틱", "우드", "애쉬", "새틴", "마블",
-                    "레드파인", "진", "연", "올", "무드", "블랙", "스카이", "베이비", "로즈",
-                    "파우더", "모닝", "틸", "샌드", "메탈", "바샬트", "웜", "차콜", "인디",
-                    "로투스", "스모키", "버터", "순백", "유백"]
-        
-        for modifier in modifiers:
-            # "크림화이트" = "크림" + "화이트"
-            if color_lower.startswith(modifier) and color_lower.endswith(korean_lower):
-                modifier_jp = {
-                    "다크": "ダーク", "라이트": "ライト", "딥": "ディープ", 
-                    "소프트": "ソフト", "크림": "クリーム", "메이플": "メープル",
-                    "아이스": "アイス", "펄": "パール", "매트": "マット",
-                    "오크": "オーク", "아카시아": "アカシア", "월넛": "ウォルナット",
-                    "멀바우": "メルバウ", "엘다": "エルダー", "고무나무": "ゴムノキ",
-                    "삼나무": "スギ", "참죽": "チャンチュン", "내추럴": "ナチュラル",
-                    "네추럴": "ナチュラル", "워시": "ウォッシュ", "빈티지": "ヴィンテージ",
-                    "엔틱": "アンティーク", "우드": "ウッド", "애쉬": "アッシュ",
-                    "새틴": "サテン", "마블": "マーブル", "레드파인": "レッドパイン",
-                    "진": "ダーク", "연": "ライト", "올": "オール", "무드": "ムード",
-                    "스카이": "スカイ", "베이비": "ベビー", "로즈": "ローズ",
-                    "파우더": "パウダー", "모닝": "モーニング", "틸": "ティール",
-                    "샌드": "サンド", "메탈": "メタル", "바샬트": "バサルト",
-                    "웜": "ウォーム", "차콜": "チャコール", "인디": "インディ",
-                    "로투스": "ロータス", "스모키": "スモーキー", "버터": "バター",
-                    "순백": "純白", "유백": "乳白"
-                }.get(modifier, modifier)
-                return f"{modifier_jp}{japanese}"
-            
-            # "화이트크림" = "화이트" + "크림" (순서 바뀐 경우)
-            if color_lower.endswith(modifier) and color_lower.startswith(korean_lower):
-                modifier_jp = {
-                    "다크": "ダーク", "라이트": "ライト", "딥": "ディープ", 
-                    "소프트": "ソフト", "크림": "クリーム", "메이플": "メープル",
-                    "아이스": "アイス", "펄": "パール", "매트": "マット",
-                    "오크": "オーク", "아카시아": "アカシア", "월넛": "ウォルナット",
-                    "멀바우": "メルバウ", "엘다": "エルダー", "고무나무": "ゴムノキ",
-                    "삼나무": "スギ", "참죽": "チャンチュン", "내추럴": "ナチュラル",
-                    "네추럴": "ナチュラル", "워시": "ウォッシュ", "빈티지": "ヴィンテージ",
-                    "엔틱": "アンティーク", "우드": "ウッド", "애쉬": "アッシュ",
-                    "새틴": "サテン", "마블": "マーブル", "레드파인": "レッドパイン",
-                    "진": "ダーク", "연": "ライト", "올": "オール", "무드": "ムード",
-                    "스카이": "スカイ", "베이비": "ベビー", "로즈": "ローズ",
-                    "파우더": "パウダー", "모닝": "モーニング", "틸": "ティール",
-                    "샌드": "サンド", "메탈": "メタル", "바샬트": "バサルト",
-                    "웜": "ウォーム", "차콜": "チャコール", "인디": "インディ",
-                    "로투스": "ロータス", "스모키": "スモーキー", "버터": "バター",
-                    "순백": "純白", "유백": "乳白"
-                }.get(modifier, modifier)
-                return f"{japanese}{modifier_jp}"
     
-    # 3단계: 부분 매칭 (기존 로직 유지하되 더 신중하게)
-    for korean, japanese in sorted_glossary:
-        korean_lower = korean.lower()
-        
-        # 기본 색상이 포함되어 있고, 전체 길이가 기본 색상보다 긴 경우만
-        if korean_lower in color_lower and len(color_lower) > len(korean_lower):
-            # 하지만 다른 기본 색상과 혼합된 경우는 DeepL로 넘김
-            other_colors = [k for k in COLOR_GLOSSARY.keys() if k != korean and k.lower() in color_lower]
-            if not other_colors:  # 다른 색상이 섞이지 않은 경우만
-                return japanese
-    
-    # 4단계: DeepL API 사용 (용어집에 없는 경우만)
-    translated = translate_with_deepl(color, api_key, target_lang)
-    return translated if translated else color
+    # 3단계: DeepL API 사용 (용어집에 없는 경우만)
+    try:
+        translated = translate_with_deepl(color, api_key, target_lang)
+        return translated if translated else color
+    except:
+        return color
 
 def translate_option_colors(option_text: str, api_key: str, target_lang: str = 'JA') -> str:
     """옵션 색상 번역 (개선된 버전)"""
@@ -575,3 +590,199 @@ def translate_option_column(df, column_name: str, api_key: str, target_lang: str
     
     df[column_name] = df[column_name].apply(translate_option_row)
     return df
+
+async def translate_option_column_batch(df, target_column: str, api_key: str, 
+                                      batch_size: int = 5, use_async: bool = True):
+    """옵션 컬럼 배치 번역 (상품명 번역과 동일한 방식)"""
+    
+    # 대폭 확장된 색상 매핑 테이블 (API 호출 최소화)
+    color_map = {
+        # 기본 색상
+        '화이트': 'ホワイト', '블랙': 'ブラック', '그레이': 'グレー',
+        '연그레이': 'ライトグレー', '진그레이': 'ダークグレー',
+        '베이지': 'ベージュ', '브라운': 'ブラウン', '네이비': 'ネイビー',
+        '오크': 'オーク', '메이플': 'メープル', '아카시아': 'アカシア',
+        '월넛': 'ウォルナット', '멀바우': 'メルバウ', '크림': 'クリーム',
+        '아이보리': 'アイボリー', '카키': 'カーキ', '올리브': 'オリーブ',
+        '민트': 'ミント', '라벤더': 'ラベンダー', '골드': 'ゴールド',
+        '실버': 'シルバー', '레드': 'レッド', '블루': 'ブルー',
+        '그린': 'グリーン', '옐로우': 'イエロー', '핑크': 'ピンク',
+        
+        # 복합 색상 (로그에서 자주 나타나는 색상들)
+        '오크화이트': 'オークホワイト', '크림화이트': 'クリームホワイト',
+        '네추럴': 'ナチュラル', '네추럴멀바우': 'ナチュラルメルバウ',
+        '네추럴피치': 'ナチュラルピーチ', '네추럴블루': 'ナチュラルブルー',
+        '화이트메이플': 'ホワイトメープル', '화이트그레이': 'ホワイトグレー',
+        '화이트오크': 'ホワイトオーク', '다크브라운': 'ダークブラウン',
+        '라이트브라운': 'ライトブラウン', '딥브라운': 'ディープブラウン',
+        
+        # 자주 사용되는 복합 색상들 추가
+        '그레이블랙': 'グレーブラック', '참죽': 'チャンチュン', '투톤': 'ツートン',
+        '모카브라운': 'モカブラウン', '버건디': 'バーガンディ', '파우더블루': 'パウダーブルー',
+        '로투스핑크': 'ロータスピンク', '네추럴화이트': 'ナチュラルホワイト',
+        '아이보리메이플': 'アイボリーメープル', '워시그린': 'ウォッシュグリーン',
+        '블랙아카시아': 'ブラックアカシア', '그레이메이플': 'グレーメープル',
+        '커피': 'コーヒー', '베이지브라운': 'ベージュブラウン', '모카': 'モカ',
+        '오렌지': 'オレンジ', '연핑크': 'ライトピンク', '라이트그레이': 'ライトグレー',
+        '웜그레이': 'ウォームグレー', '샌드베이지': 'サンドベージュ', '어프리콧': 'アプリコット',
+        '레몬': 'レモン', '대리석': '大理石', '투명': '透明', '엘다': 'エルダー',
+        '포레스트그린': 'フォレストグリーン', '샌드그레이': 'サンドグレー',
+        '새틴그레이': 'サテングレー', '바샬트그레이': 'バサルトグレー',
+        '차콜그레이': 'チャコールグレー', '메탈그레이': 'メタルグレー',
+        '빈티지그레이': 'ヴィンテージグレー', '페일그레이': 'ペールグレー',
+        '다크그레이': 'ダークグレー', '연회색': 'ライトグレー',
+        '무드블랙': 'ムードブラック', '차콜블랙': 'チャコールブラック',
+        '로즈골드': 'ローズゴールド', '무광실버': 'マットシルバー',
+        '유광실버': 'グロッシーシルバー', '세라믹': 'セラミック',
+        '원목': '無垢材', '내추럴': 'ナチュラル', '워시': 'ウォッシュ',
+        '빈티지': 'ヴィンテージ', '엔틱': 'アンティーク', '새틴': 'サテン',
+        '마블': 'マーブル', '메탈': 'メタル', '우드': 'ウッド'
+    }
+    
+    def process_option_text(option_text):
+        """옵션 텍스트 처리 함수"""
+        if pd.isna(option_text) or not str(option_text).strip():
+            return option_text
+        
+        text = str(option_text).strip()
+        
+        # 색상{...} 형식이 아니면 원본 반환
+        if not text.startswith('색상{') or not text.endswith('}'):
+            return text
+        
+        try:
+            # 색상 추출
+            colors_part = text[3:-1]  # '색상{' 와 '}' 제거
+            colors = [c.strip() for c in colors_part.split('|') if c.strip()]
+            
+            # 빈 괄호인 경우 원본 그대로 반환 (처리하지 않음)
+            if not colors:
+                print(f"빈 옵션 발견, 원본 유지: {text}")
+                return text
+            
+            # 매핑 테이블에 있는 색상과 없는 색상 분리
+            mapped_colors = []
+            api_needed_colors = []
+            color_indices = []
+            
+            for i, color in enumerate(colors):
+                if color in color_map:
+                    mapped_colors.append((i, color_map[color]))
+                else:
+                    api_needed_colors.append(color)
+                    color_indices.append(i)
+            
+            return {
+                'original': text,
+                'colors': colors,
+                'mapped_colors': mapped_colors,
+                'api_needed_colors': api_needed_colors,
+                'color_indices': color_indices
+            }
+        except Exception as e:
+            print(f"옵션 처리 오류: {text}, 에러: {str(e)}")
+            return text
+    
+    # 모든 옵션 텍스트 처리
+    texts = df[target_column].fillna("").astype(str).tolist()
+    processed_data = [process_option_text(text) for text in texts]
+    
+    # API 번역이 필요한 색상들 수집
+    all_api_colors = []
+    for data in processed_data:
+        if isinstance(data, dict) and 'api_needed_colors' in data:
+            all_api_colors.extend(data['api_needed_colors'])
+    
+    # 중복 제거
+    unique_api_colors = list(set(all_api_colors))
+    
+    # API 번역 실행 (429 에러 방지를 위한 제한된 처리)
+    if unique_api_colors:
+        print(f"API 번역 필요한 색상 수: {len(unique_api_colors)}")
+        
+        # 429 에러 방지: API 번역을 제한하고 대부분 원본 유지
+        api_translation_dict = {}
+        
+        if len(unique_api_colors) > 100:
+            print(f"⚠️ API 번역 필요한 색상이 {len(unique_api_colors)}개로 너무 많습니다.")
+            print("429 에러 방지를 위해 API 번역을 건너뛰고 원본 색상을 유지합니다.")
+            print("매핑 테이블에 자주 사용되는 색상을 추가하는 것을 권장합니다.")
+        else:
+            print(f"API 번역 시도: {unique_api_colors[:10]}...")  # 처음 10개만 출력
+            
+            # 소량의 색상만 API 번역 시도
+            if use_async:
+                translated_api_colors = await translate_batch_async_with_deepl(
+                    unique_api_colors, api_key, batch_size=2  # 배치 크기를 2로 줄임
+                )
+            else:
+                translated_api_colors = translate_batch_with_deepl(
+                    unique_api_colors, api_key, batch_size=2
+                )
+            
+            # 번역 결과 분석
+            successful_translations = 0
+            failed_translations = 0
+            
+            # 번역 결과를 딕셔너리로 변환 (빈 결과 필터링)
+            for original, translated in zip(unique_api_colors, translated_api_colors):
+                # 번역 결과가 유효한 경우만 딕셔너리에 추가
+                if translated and translated.strip():
+                    api_translation_dict[original] = translated
+                    successful_translations += 1
+                else:
+                    failed_translations += 1
+                    # 실패한 색상은 로그만 출력 (너무 많아서 일부만)
+                    if failed_translations <= 10:
+                        print(f"번역 실패: '{original}' -> '{translated}'")
+            
+            print(f"번역 성공: {successful_translations}개, 실패: {failed_translations}개")
+    else:
+        api_translation_dict = {}
+        print("API 번역이 필요한 색상이 없습니다 (모두 매핑 테이블에 있음)")
+    
+    # 최종 결과 조합
+    final_results = []
+    for data in processed_data:
+        if isinstance(data, str):
+            # 처리되지 않은 텍스트 (색상 형식이 아님)
+            final_results.append(data)
+        elif isinstance(data, dict):
+            # 색상 형식 텍스트
+            colors = data['colors'][:]
+            
+            # 매핑된 색상 적용
+            for idx, translated in data['mapped_colors']:
+                colors[idx] = translated
+            
+            # API 번역된 색상 적용 (실패 시 원본 보존)
+            for i, original_idx in enumerate(data['color_indices']):
+                original_color = data['api_needed_colors'][i]
+                if original_color in api_translation_dict:
+                    translated_color = api_translation_dict[original_color]
+                    # 번역 결과가 유효한 경우만 적용, 그렇지 않으면 원본 유지
+                    if translated_color and translated_color.strip():
+                        colors[original_idx] = translated_color
+                    else:
+                        # 번역 실패 시 원본 색상 명시적으로 유지
+                        colors[original_idx] = original_color
+                else:
+                    # API 번역 딕셔너리에 없는 경우 (건너뛴 경우) 원본 색상 유지
+                    colors[original_idx] = original_color
+            
+            # 최종 옵션 텍스트 구성 (빈 색상 필터링)
+            valid_colors = [color for color in colors if color and color.strip()]
+            if valid_colors:
+                final_results.append(f"색상{{{'|'.join(valid_colors)}}}")
+            else:
+                # 모든 색상이 빈 문자열인 경우 원본 반환
+                print(f"⚠️ 모든 색상이 빈 문자열: {data['original']}")
+                print(f"   원본 색상들: {data['colors']}")
+                print(f"   처리된 색상들: {colors}")
+                print(f"   매핑된 색상들: {data['mapped_colors']}")
+                print(f"   API 필요 색상들: {data['api_needed_colors']}")
+                final_results.append(data['original'])
+        else:
+            final_results.append(data)
+    
+    return final_results

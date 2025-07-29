@@ -15,13 +15,15 @@ from utils import (
     merge_files,
     preprocess_categories
 )
-from utils.translate_simplified import (
-    translate_product_names,
-    translate_option_column,
+from utils.option_translate import (
+    translate_option_column_batch,
     translate_option_colors,
     analyze_colors_in_data,
     suggest_glossary_additions,
     export_color_analysis_to_excel
+)
+from utils.translate_simplified import (
+    translate_product_names
 )
 # from utils.validation import DataValidator, display_validation_results  # 제거됨
 from utils.chunk_processor import ChunkProcessor, display_chunk_info, recommend_chunk_size
@@ -555,7 +557,6 @@ with tab6:
             if not auth_key:
                 st.warning("⚠️ DeepL API 키를 입력해주세요.")
             else:
-                # API 키 검증 기능 제거됨 (사용자 요청)
                 
                 # 다단계 진행률 표시
                 steps = create_processing_steps(["번역 처리", "결과 정리"])
@@ -651,47 +652,60 @@ with tab7:
                     option_mask = df[col].apply(lambda x: is_option_format(str(x)) if pd.notna(x) else False)
                     option_data_count += option_mask.sum()
                 
+                st.info(f"발견된 옵션 컬럼: {', '.join(option_columns)}")
                 st.info(f"번역 가능한 옵션 데이터: {option_data_count}개")
                 
-                # 컬럼 선택
-                selected_columns = st.multiselect(
-                    "번역할 옵션 컬럼을 선택하세요",
-                    option_columns,
-                    default=option_columns,
-                    key="option_columns_7"
-                )
+                # 모든 옵션 컬럼을 자동으로 선택 (선택 메뉴 제거)
+                selected_columns = option_columns
                 
-                if selected_columns and st.button("옵션 번역 시작", key="option_translate_7"):
-                    with st.spinner("옵션 번역 중..."):
-                        try:
-                            progress_bar = st.progress(0)
-                            total_cols = len(selected_columns)
+                if st.button("옵션 번역 시작", key="option_translate_7"):
+                    # 다단계 진행률 표시 (상품명 번역과 동일)
+                    steps = create_processing_steps(["옵션 번역 처리", "결과 정리"])
+                    multi_progress = MultiStepProgress(steps)
+                    
+                    try:
+                        multi_progress.start_step(0)
+                        
+                        # 각 컬럼별로 번역 처리
+                        for col in selected_columns:
+                            st.write(f"번역 중: {col}")
                             
-                            for idx, col in enumerate(selected_columns):
-                                st.write(f"번역 중: {col}")
-                                df = translate_option_column(df, col, api_key, target_lang='JA')
-                                progress_bar.progress((idx + 1) / total_cols)
+                            # 옵션 번역 실행 (비동기, 상품명 번역과 동일한 방식)
+                            translated_texts = asyncio.run(translate_option_column_batch(
+                                df=df,
+                                target_column=col,
+                                api_key=api_key,
+                                batch_size=5,
+                                use_async=True
+                            ))
+                            df[col] = translated_texts
+                        
+                        multi_progress.complete_step()
+                        multi_progress.start_step(1)
+                        
+                        # 결과 저장
+                        buffer = save_processed_data(df, 7)
+                        
+                        # 메모리 정리
+                        gc.collect()
+                        multi_progress.complete_step()
+                        multi_progress.complete_all("옵션 번역이 완료되었습니다!")
                             
-                            # 결과 저장
-                            buffer = save_processed_data(df, 7)
+                        # 결과 미리보기
+                        st.subheader("번역 결과 미리보기")
+                        preview_df = df[selected_columns].head()
+                        st.write(preview_df)
+
+                        st.download_button(
+                            label="📥 번역 완료 파일 다운로드",
+                            data=buffer.getvalue(),
+                            file_name="option_translated.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_7"
+                        )
                             
-                            # 결과 미리보기
-                            st.subheader("번역 결과 미리보기")
-                            preview_df = df[selected_columns].head()
-                            st.write(preview_df)
-                            
-                            st.download_button(
-                                label="번역된 파일 다운로드",
-                                data=buffer.getvalue(),
-                                file_name="option_translated.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="download_7"
-                            )
-                            
-                            st.success("옵션 번역이 완료되었습니다!")
-                            
-                        except Exception as e:
-                            st.error(f"번역 중 오류가 발생했습니다: {str(e)}")
+                    except Exception as e:
+                        st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
             else:
                 st.warning("옵션 관련 컬럼을 찾을 수 없습니다.")
         else:
