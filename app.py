@@ -550,6 +550,23 @@ with tab6:
             value=5,
             key="batch_size_6"
         )
+        
+        if auth_key:
+            # 번역 대상 상품명 개수 확인
+            total_product_names = len(df[df["상품명"].notna()])
+            
+            if total_product_names > 0:
+                # 시간 및 사용량 추정
+                time_estimate = estimate_translation_time(total_product_names, batch_size=batch_size)
+                usage_estimate = estimate_api_usage(total_product_names, avg_chars_per_text=20)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("예상 소요 시간", f"{time_estimate['estimated_minutes']:.1f}분")
+                with col2:
+                    st.metric("예상 API 사용량", f"{usage_estimate['estimated_total_chars']:,}자")
+                with col3:
+                    st.metric("무료 한도 사용률", f"{usage_estimate['usage_percentage']:.1f}%")
 
         if st.button("번역 시작", key="translation_start_6"):
             if not auth_key:
