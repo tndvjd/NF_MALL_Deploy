@@ -233,11 +233,39 @@ def translate_batch_with_deepl(texts: List[str], api_key: str, target_lang: str 
 async def translate_batch_async_with_deepl(texts: List[str], api_key: str, 
                                          target_lang: str = 'JA', 
                                          batch_size: int = 5) -> List[str]:
-    """배치 번역 (비동기 방식)"""
+    """배치 번역 (비동기 방식) - 중복 제거 및 캐싱 최적화"""
     if not texts:
         return []
     
+    from utils.translation_cache import get_translation_cache
+    cache = get_translation_cache()
+    
+    # 1단계: 캐시에서 기존 번역 조회 및 중복 제거
+    unique_texts = []
+    text_to_indices = {}  # 각 고유 텍스트가 원본 리스트의 어느 위치에 있는지 매핑
     translated_texts = [""] * len(texts)
+    
+    for i, text in enumerate(texts):
+        if not text or not text.strip():
+            translated_texts[i] = text
+            continue
+        
+        # 캐시 조회
+        cached_result = cache.get(text, target_lang)
+        if cached_result is not None:
+            translated_texts[i] = cached_result
+            continue
+        
+        # 중복 제거
+        if text not in text_to_indices:
+            text_to_indices[text] = []
+            unique_texts.append(text)
+        text_to_indices[text].append(i)
+    
+    if not unique_texts:
+        return translated_texts
+    
+    st.info(f"🔄 중복 제거: {len(texts)}개 → {len(unique_texts)}개 (캐시 적중: {len(texts) - len(unique_texts) - sum(len(indices) for indices in text_to_indices.values())}개)")
     
     # 진행률 표시
     progress_bar = st.progress(0)

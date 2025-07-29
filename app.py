@@ -16,11 +16,7 @@ from utils import (
     preprocess_categories
 )
 from utils.option_translate import (
-    translate_option_column_batch,
-    translate_option_colors,
-    analyze_colors_in_data,
-    suggest_glossary_additions,
-    export_color_analysis_to_excel
+    translate_option_column_batch
 )
 from utils.translate_simplified import (
     translate_product_names
@@ -30,6 +26,9 @@ from utils.chunk_processor import ChunkProcessor, display_chunk_info, recommend_
 from utils.progress import (
     progress_context, MultiStepProgress, create_processing_steps,
     show_data_processing_progress, show_translation_progress
+)
+from utils.parallel_translation import (
+    ParallelTranslationManager, estimate_translation_time, estimate_api_usage
 )
 
 st.set_page_config(
@@ -116,8 +115,8 @@ tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "5️⃣ 옵션 형식 변환",
     "6️⃣ 상품명 번역",
     "7️⃣ 옵션 번역",
-    "8️⃣ 청크 다운로드",
-    "🔍 색상 분석"
+    "🚀 통합 번역",
+    "8️⃣ 청크 다운로드"
 ])
 
 # 사용설명서 탭
@@ -180,8 +179,8 @@ with tab0:
     #### 7단계: 옵션 번역
     - 색상 옵션을 일본어로 자동 번역
     - 옵션 형식 구조 보존 (색상{...} 형태 유지)
-    - 100+ 색상 용어집 활용으로 정확한 번역
-    - DeepL API와 용어집의 하이브리드 번역 (41% API 절약)
+    - DeepL API를 활용한 배치 번역으로 안정적인 처리
+    - 상품명 번역과 동일한 방식으로 일관성 있는 번역
     
     #### 8단계: 청크 다운로드
     - 쇼핑몰에 업로드 가능한 단위로 분할
@@ -609,23 +608,17 @@ with tab7:
     ### 📝 사용 방법
     1. 옵션 형식이 변환된 엑셀 파일을 업로드하세요
     2. DeepL API 키를 입력하세요 ([API 키 발급받기](https://www.deepl.com/ko/pro-api))
-    3. 번역할 옵션 컬럼을 선택하세요
-    4. '옵션 번역 시작' 버튼을 클릭하세요
+    3. '옵션 번역 시작' 버튼을 클릭하세요
     
     ### 번역 예시
     - 번역 전: "색상{화이트|블랙|브라운}"
     - 번역 후: "색상{ホワイト|ブラック|ブラウン}"
     
-    ### 🎯 개선된 번역 시스템
-    - **용어집 우선**: 100+ 색상 용어를 정확하게 번역
-    - **복합 색상 지원**: "크림화이트" → "クリームホワイト"
-    - **목재 색상 완벽 지원**: "오크", "메이플", "아카시아" 등
-    - **API 절약**: 용어집 매칭 시 API 사용 안함 (41% 절약)
-    
     ### ⚠️ 주의사항
     - 옵션 형식(색상{...})으로 변환된 데이터만 번역됩니다
-    - DeepL API 키가 필요합니다 (용어집에 없는 색상만)
-    - 용어집에 없는 특수 색상은 DeepL로 번역됩니다
+    - DeepL API는 월 50만 자까지 무료로 사용 가능합니다
+    - 대량의 옵션 번역 시 API 사용량을 고려해주세요
+    - 상품명 번역과 동일한 배치 처리 방식으로 안정적인 번역
     """)
 
     # 이전 단계 결과 파일 자동 로드
@@ -652,49 +645,77 @@ with tab7:
                     option_mask = df[col].apply(lambda x: is_option_format(str(x)) if pd.notna(x) else False)
                     option_data_count += option_mask.sum()
                 
-                st.info(f"발견된 옵션 컬럼: {', '.join(option_columns)}")
-                st.info(f"번역 가능한 옵션 데이터: {option_data_count}개")
+                st.info(f"📋 발견된 옵션 컬럼: {', '.join(option_columns)}")
+                st.info(f"🎯 번역 가능한 옵션 데이터: {option_data_count}개")
                 
-                # 모든 옵션 컬럼을 자동으로 선택 (선택 메뉴 제거)
+                # 모든 옵션 컬럼을 자동으로 처리
                 selected_columns = option_columns
                 
+                # 번역 예상 정보 표시
+                total_option_texts = sum(
+                    df[col].apply(lambda x: is_option_format(str(x)) if pd.notna(x) else False).sum()
+                    for col in selected_columns
+                )
+                
+                if total_option_texts > 0:
+                    # 시간 및 사용량 추정
+                    time_estimate = estimate_translation_time(total_option_texts, batch_size=5)
+                    usage_estimate = estimate_api_usage(total_option_texts, avg_chars_per_text=15)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("예상 소요 시간", f"{time_estimate['estimated_minutes']:.1f}분")
+                    with col2:
+                        st.metric("예상 API 사용량", f"{usage_estimate['estimated_total_chars']:,}자")
+                    with col3:
+                        st.metric("무료 한도 사용률", f"{usage_estimate['usage_percentage']:.1f}%")
+                
+                # 병렬 처리 옵션
+                use_parallel = st.checkbox(
+                    "🚀 병렬 처리 사용 (여러 컬럼 동시 번역)", 
+                    value=len(selected_columns) > 1,
+                    help="여러 옵션 컬럼을 동시에 번역하여 처리 시간을 단축합니다."
+                )
+                
                 if st.button("옵션 번역 시작", key="option_translate_7"):
-                    # 다단계 진행률 표시 (상품명 번역과 동일)
-                    steps = create_processing_steps(["옵션 번역 처리", "결과 정리"])
-                    multi_progress = MultiStepProgress(steps)
+                    # 병렬 번역 매니저 생성
+                    parallel_manager = ParallelTranslationManager(api_key, batch_size=5)
                     
                     try:
-                        multi_progress.start_step(0)
-                        
-                        # 각 컬럼별로 번역 처리
-                        for col in selected_columns:
-                            st.write(f"번역 중: {col}")
+                        if use_parallel and len(selected_columns) > 1:
+                            st.info("🚀 병렬 처리 모드로 번역을 시작합니다...")
                             
-                            # 옵션 번역 실행 (비동기, 상품명 번역과 동일한 방식)
-                            translated_texts = asyncio.run(translate_option_column_batch(
-                                df=df,
-                                target_column=col,
-                                api_key=api_key,
-                                batch_size=5,
-                                use_async=True
+                            # 병렬 번역 실행
+                            df = asyncio.run(parallel_manager.translate_multiple_option_columns_parallel(
+                                df, selected_columns
                             ))
-                            df[col] = translated_texts
-                        
-                        multi_progress.complete_step()
-                        multi_progress.start_step(1)
+                        else:
+                            st.info("🔄 순차 처리 모드로 번역을 시작합니다...")
+                            
+                            # 순차 번역 실행
+                            for col in selected_columns:
+                                st.write(f"번역 중: {col}")
+                                translated_texts = asyncio.run(translate_option_column_batch(
+                                    df=df,
+                                    target_column=col,
+                                    api_key=api_key,
+                                    batch_size=5,
+                                    use_async=True
+                                ))
+                                df[col] = translated_texts
                         
                         # 결과 저장
                         buffer = save_processed_data(df, 7)
                         
                         # 메모리 정리
                         gc.collect()
-                        multi_progress.complete_step()
-                        multi_progress.complete_all("옵션 번역이 완료되었습니다!")
+                        
+                        st.success("✅ 옵션 번역이 완료되었습니다!")
                             
                         # 결과 미리보기
                         st.subheader("번역 결과 미리보기")
                         preview_df = df[selected_columns].head()
-                        st.write(preview_df)
+                        st.dataframe(preview_df, use_container_width=True)
 
                         st.download_button(
                             label="📥 번역 완료 파일 다운로드",
@@ -786,122 +807,4 @@ with tab8:
         except Exception as e:
             st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
 
-# 색상 분석 탭 (임시 기능)
-with tab9:
-    st.header("🔍 색상 데이터 분석")
-    st.markdown("""
-    ### 📝 사용 방법
-    1. 옵션 형식이 변환된 엑셀 파일을 업로드하세요
-    2. '색상 분석 실행' 버튼을 클릭하세요
-    3. 분석 결과를 확인하고 용어집 개선에 활용하세요
-    
-    ### 💡 분석 내용
-    - 전체 색상 종류 및 빈도 분석
-    - 용어집 커버리지 확인
-    - 미등록 색상에 대한 번역 제안
-    - 컬럼별 색상 분포 분석
-    """)
-    
-    # 파일 업로드
-    uploaded_file = st.file_uploader(
-        "색상 분석할 엑셀 파일을 업로드하세요", 
-        type=['xlsx'], 
-        key="color_analysis_file"
-    )
-    
-    if uploaded_file:
-        try:
-            df_analysis = pd.read_excel(uploaded_file, engine='openpyxl')
-            st.success(f"✅ 파일 로드 완료: {len(df_analysis):,}행")
-            
-            # 옵션 컬럼 확인
-            option_columns = [col for col in df_analysis.columns if '옵션입력' in col]
-            if option_columns:
-                st.info(f"발견된 옵션 컬럼: {', '.join(option_columns)}")
-                
-                # 색상 분석 실행
-                if st.button("🔍 색상 분석 실행", key="analyze_colors_main", use_container_width=True):
-                    with st.spinner("색상 데이터 분석 중..."):
-                        try:
-                            analysis_result = analyze_colors_in_data(df_analysis, option_columns)
-                            
-                            # 분석 결과 요약
-                            st.subheader("📊 분석 결과 요약")
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("총 색상 종류", f"{analysis_result['total_colors']}개")
-                            with col2:
-                                st.metric("용어집 커버리지", f"{analysis_result['glossary_coverage']:.1f}%")
-                            with col3:
-                                st.metric("등록된 색상", f"{len(analysis_result['colors_in_glossary'])}개")
-                            with col4:
-                                st.metric("미등록 색상", f"{len(analysis_result['colors_not_in_glossary'])}개")
-                            
-                            # 용어집에 있는 색상
-                            if analysis_result['colors_in_glossary']:
-                                st.subheader("✅ 용어집에 등록된 색상")
-                                glossary_df = pd.DataFrame(
-                                    analysis_result['colors_in_glossary'],
-                                    columns=['한국어', '빈도', '일본어']
-                                ).sort_values('빈도', ascending=False)
-                                st.dataframe(glossary_df, use_container_width=True)
-                            
-                            # 용어집에 없는 색상
-                            if analysis_result['colors_not_in_glossary']:
-                                st.subheader("⚠️ 용어집에 없는 색상")
-                                missing_df = pd.DataFrame(
-                                    analysis_result['colors_not_in_glossary'],
-                                    columns=['색상명', '빈도']
-                                ).sort_values('빈도', ascending=False)
-                                st.dataframe(missing_df, use_container_width=True)
-                                
-                                # 용어집 추가 제안
-                                suggestions = suggest_glossary_additions(analysis_result['colors_not_in_glossary'])
-                                if suggestions:
-                                    st.subheader("💡 용어집 추가 제안")
-                                    st.info("다음 색상들을 용어집에 추가하는 것을 권장합니다:")
-                                    
-                                    # 상위 10개 표시
-                                    for suggestion in suggestions[:10]:
-                                        st.code(suggestion)
-                                    
-                                    # 전체 제안 보기
-                                    if len(suggestions) > 10:
-                                        with st.expander(f"전체 제안 보기 ({len(suggestions)}개)"):
-                                            for suggestion in suggestions:
-                                                st.code(suggestion)
-                            
-                            # 컬럼별 색상 분포
-                            st.subheader("📊 컬럼별 색상 분포")
-                            for col, color_counter in analysis_result['colors_by_column'].items():
-                                if color_counter:
-                                    with st.expander(f"{col} ({len(color_counter)}개 색상)"):
-                                        top_colors = color_counter.most_common(10)
-                                        col_df = pd.DataFrame(top_colors, columns=['색상명', '빈도'])
-                                        st.dataframe(col_df, use_container_width=True)
-                            
-                            # 분석 결과 엑셀 다운로드
-                            st.subheader("📥 분석 결과 다운로드")
-                            try:
-                                excel_data = export_color_analysis_to_excel(analysis_result)
-                                st.download_button(
-                                    label="📊 색상 분석 결과 엑셀 다운로드",
-                                    data=excel_data,
-                                    file_name="color_analysis_result.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="download_color_analysis_main",
-                                    use_container_width=True
-                                )
-                                st.success("✅ 엑셀 파일이 준비되었습니다!")
-                            except Exception as e:
-                                st.error(f"엑셀 생성 중 오류: {str(e)}")
-                                
-                        except Exception as e:
-                            st.error(f"색상 분석 중 오류가 발생했습니다: {str(e)}")
-            else:
-                st.warning("⚠️ 옵션 관련 컬럼을 찾을 수 없습니다. 옵션 형식 변환을 먼저 진행해주세요.")
-                
-        except Exception as e:
-            st.error(f"파일 읽기 중 오류가 발생했습니다: {str(e)}")
-    else:
-        st.info("👆 분석할 엑셀 파일을 업로드해주세요.")
+
