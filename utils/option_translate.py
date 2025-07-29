@@ -1,7 +1,7 @@
 import re
 import streamlit as st
 from typing import List, Dict, Optional
-from .translate import translate_batch_with_deepl
+from .translate_simplified import translate_with_deepl
 
 def extract_option_colors(option_text: str) -> Optional[Dict[str, any]]:
     """
@@ -83,14 +83,11 @@ def translate_option_colors(option_text: str, api_key: str, target_lang: str = '
         # 개별 색상명들을 번역
         colors_to_translate = extracted['colors']
         
-        # DeepL API로 배치 번역 (기존 번역 함수 재사용)
-        translated_colors = translate_batch_with_deepl(
-            texts=colors_to_translate,
-            api_key=api_key,
-            target_lang=target_lang,
-            batch_size=len(colors_to_translate),  # 모든 색상을 한 번에 처리
-            use_cache=True
-        )
+        # DeepL API로 개별 번역 (간소화된 번역 함수 사용)
+        translated_colors = []
+        for color in colors_to_translate:
+            translated_color = translate_with_deepl(color, api_key, target_lang)
+            translated_colors.append(translated_color if translated_color else color)
         
         # 번역 실패 시 원본 반환
         if not translated_colors or len(translated_colors) != len(colors_to_translate):
