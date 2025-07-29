@@ -95,7 +95,7 @@ def translate_option_colors(option_text: str, api_key: str, target_lang: str = '
         colors_to_translate = extracted['colors']
         
         # 상품명 번역과 동일한 방식으로 배치 번역
-        from .translate_simplified import translate_batch_with_deepl
+        from utils.translate_simplified import translate_batch_with_deepl
         translated_colors = translate_batch_with_deepl(colors_to_translate, api_key, target_lang, batch_size=5)
         
         # 번역 실패 시 원본 반환
@@ -288,7 +288,7 @@ async def translate_option_column_batch(df: pd.DataFrame, target_column: str, ap
         
         try:
             import asyncio
-            from .translate_simplified import translate_batch_async_with_deepl, translate_batch_with_deepl
+            from utils.translate_simplified import translate_batch_async_with_deepl, translate_batch_with_deepl
             
             # 번역 시작 전 진행률 업데이트
             overall_progress.progress(0.3)
