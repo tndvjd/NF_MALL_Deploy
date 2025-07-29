@@ -1,11 +1,18 @@
+"""
+옵션 번역 모듈 - 개선된 배치 번역 방식
+
+주요 변경사항:
+- 복잡한 용어집 매칭 로직 제거
+- 상품명 번역과 동일한 DeepL 배치 번역 방식 적용
+- 개별 색상명을 추출하여 배치로 번역 후 재구성
+- 구조 안정성과 번역 품질 향상
+"""
+
 import re
 import streamlit as st
 from typing import List, Dict, Optional
-from .translate_simplified import translate_with_deepl
-import asyncio
-import aiohttp
-import time
 import pandas as pd
+import io
 
 def extract_option_colors(option_text: str) -> Optional[Dict[str, any]]:
     """
@@ -65,7 +72,7 @@ def reconstruct_option_text(prefix: str, translated_colors: List[str]) -> str:
 
 def translate_option_colors(option_text: str, api_key: str, target_lang: str = 'JA') -> str:
     """
-    옵션 텍스트의 색상명만 번역하는 함수
+    옵션 텍스트의 색상명을 배치 번역하는 함수 (상품명 번역과 동일한 방식)
     
     Args:
         option_text: '색상{화이트|진그레이|오크화이트}' 형식의 텍스트
@@ -84,16 +91,12 @@ def translate_option_colors(option_text: str, api_key: str, target_lang: str = '
         return option_text
     
     try:
-        # 개별 색상명들을 번역
+        # 개별 색상명들을 추출
         colors_to_translate = extracted['colors']
         
-        # 용어집 우선 번역 (개선된 번역 함수 사용)
-        from .translate_simplified import translate_color_with_glossary
-        
-        translated_colors = []
-        for color in colors_to_translate:
-            translated_color = translate_color_with_glossary(color, api_key, target_lang)
-            translated_colors.append(translated_color if translated_color else color)
+        # 상품명 번역과 동일한 방식으로 배치 번역
+        from .translate_simplified import translate_batch_with_deepl
+        translated_colors = translate_batch_with_deepl(colors_to_translate, api_key, target_lang, batch_size=5)
         
         # 번역 실패 시 원본 반환
         if not translated_colors or len(translated_colors) != len(colors_to_translate):
@@ -197,157 +200,277 @@ def test_option_translation():
 if __name__ == "__main__":
     test_option_translation()
 
-# 색상 번역 용어집 (한국어 -> 일본어) - 대폭 확장
-COLOR_GLOSSARY: Dict[str, str] = {
-    # 기본 색상
-    "빨간색": "レッド", "빨강": "レッド", "레드": "レッド", "적색": "レッド",
-    "파란색": "ブルー", "파랑": "ブルー", "블루": "ブルー", "청색": "ブルー",
-    "노란색": "イエロー", "노랑": "イエロー", "옐로우": "イエ로ー", "황색": "イエ로ー",
-    "초록색": "グリーン", "초록": "グリーン", "녹색": "グリーン", "그린": "グリーン",
-    "보라색": "パープル", "보라": "パープル", "퍼플": "パープル", "자주색": "パープル",
-    "주황색": "オレンジ", "주황": "オレンジ", "오렌지": "オレンジ",
-    "분홍색": "ピンク", "분홍": "ピンク", "핑크": "ピンク",
-    
-    # 무채색
-    "검은색": "ブラック", "검정": "ブラック", "블랑": "ブラック", "흑색": "ブラック",
-    "하얀색": "ホワイト", "하양": "ホワイト", "화이트": "ホワイト", "백색": "ホワイト",
-    "회색": "グレー", "그레이": "グレー", "회백색": "グレー",
-    
-    # 고급 색상
-    "베이지": "ベージュ", "아이보리": "アイボリー", "크림": "クリーム",
-    "네이비": "ネイビー", "남색": "ネイビー", "감청색": "ネイビー",
-    "카키": "カーキ", "올리브": "オリーブ", "민트": "ミント",
-    "라벤더": "ラベンダー", "바이올렛": "バイオレット",
-    "마젠타": "マゼンタ", "시안": "シアン", "터콰이즈": "ターコイズ",
-    
-    # 브라운 계열
-    "갈색": "ブラウン", "브라운": "ブラウン", "밤색": "ブラウン",
-    "초콜릿": "チョコレート", "커피": "コーヒー", "모카": "モカ",
-    "카멜": "キャメル", "타바코": "タバコ",
-    
-    # 골드/실버 계열
-    "금색": "ゴールド", "골드": "ゴールド", "황금색": "ゴールド",
-    "은색": "シルバー", "실버": "シルバー", "백금색": "プラチナ",
-    
-    # 목재/가구 색상 (분석 결과 기반 추가)
-    "오크": "オーク", "메이플": "メープル", "아카시아": "アカシア",
-    "월넛": "ウォルナット", "멀바우": "メルバウ", "엘다": "エルダー",
-    "고무나무": "ゴムノキ", "삼나무": "スギ", "참죽": "チャンチュン",
-    "내추럴": "ナチュラル", "네추럴": "ナチュラル", "워시": "ウォッシュ",
-    "빈티지": "ヴィンテージ", "엔틱": "アンティーク", "우드": "ウッド",
-    "애쉬": "アッシュ", "새틴": "サテン", "마블": "マーブル",
-    "세라믹": "セラミック", "편백": "ヒノキ", "자작나무": "シラカバ",
-    
-    # 색상 수식어
-    "연그레이": "ライトグレー", "진그레이": "ダークグレー", "무드블랙": "ムードブラック",
-    "스카이블루": "スカイブルー", "베이비핑크": "ベビーピンク", "로즈골드": "로ーズゴールド",
-    "파우더블루": "パウダーブルー", "모닝블루": "モーニングブルー", "틸블루": "ティールブルー",
-    "샌드베이지": "サンドベージュ", "샌드그레이": "サンドグレー", "메탈그레이": "メタルグレー",
-    "바샬트그레이": "バサルトグレー", "새틴그레이": "サテングレー", "빈티지그레이": "ヴィンテージグレー",
-    "웜그레이": "ウォームグレー", "차콜그레이": "チャコールグレー", "연핑크": "ライトピンク",
-    "인디핑크": "インディピンク", "로투스핑크": "ロータスピンク", "올리브그린": "オリーブグリーン",
-    "포레스트그린": "フォレストグリーン", "민트그린": "ミントグリーン", "틸그린": "ティールグリーン",
-    "스모키올리브": "スモーキーオリーブ", "버터옐로우": "バターイエロー", "연노랑": "ライトイエロー",
-    
-    # 복합 색상 (고빈도)
-    "순백색": "純白", "유백": "乳白", "버터": "バター", "캐럿": "キャロット",
-    "어프리콧": "アプリコット", "피치": "ピーチ", "코랄": "コーラル", "와인": "ワイン",
-    "버건디": "バーガンディ", "머스타드": "マスタード", "바닐라": "バニラ",
-    "레몬": "レモン", "청록": "ターコイズ", "스카이": "スカイ", "블루베리": "ブルーベリー",
-    
-    # 특수 색상
-    "투명": "透明", "클리어": "クリア", "매트": "マット", "메탈": "メタル",
-    "글로시": "グロッシー", "메탈릭": "メタリック", "새틴": "サテン",
-    "대리석": "大理石", "원목": "無垢材", "투톤": "ツートン",
-    
-    # 패턴/질감
-    "무늬": "柄", "패턴": "パターン", "스트라이프": "ストライプ",
-    "체크": "チェック", "도트": "ドット", "플라워": "フラワー",
-    
-    # 자주 사용되는 복합 색상들 추가 (미번역 문제 해결용)
-    "오크화이트": "オークホワイト", "크림화이트": "クリームホワイト",
-    "네추럴피치": "ナチュラルピーチ", "네추럴블루": "ナチュラルブルー",
-    "네추럴멀바우": "ナチュラルメルバウ", "네추럴화이트": "ナチュラルホワイト",
-    "화이트메이플": "ホワイトメープル", "화이트그레이": "ホワイトグレー",
-    "화이트오크": "ホワイトオーク", "다크브라운": "ダークブラウン",
-    "라이트브라운": "ライトブラウン", "딥브라운": "ディープブラウン",
-    "그레이블랙": "グレーブラック", "모카브라운": "モカブラウン",
-    "아이보리메이플": "アイボリーメープル", "워시그린": "ウォッシュグリーン",
-    "블랙아카시아": "ブラックアカシア", "그레이메이플": "グレーメープル",
-    "베이지브라운": "ベージュブラウン", "라이트그레이": "ライトグレー",
-    "페일그레이": "ペールグレー", "다크그레이": "ダークグレー",
-    "연회색": "ライトグレー", "차콜블랙": "チャコールブラック",
-    "무광실버": "マットシルバー", "유광실버": "グロッシーシルバー"
-}
+# 용어집 기반 번역 제거 - DeepL 배치 번역으로 대체
+# 필요시 후처리에서 명확한 오역만 수정
 
-def translate_color_with_glossary(color: str, api_key: str, target_lang: str = 'JA') -> str:
-    """용어집을 활용한 색상 번역 (간소화된 버전)"""
-    if not color or not color.strip():
-        return color
-    
-    color = color.strip()
-    color_lower = color.lower()
-    
-    # 1단계: 정확한 매칭 우선
-    if color_lower in COLOR_GLOSSARY:
-        return COLOR_GLOSSARY[color_lower]
-    
-    # 2단계: 부분 매칭 (간소화)
-    for korean, japanese in COLOR_GLOSSARY.items():
-        if korean.lower() in color_lower:
-            return japanese
-    
-    # 3단계: DeepL API 사용 (용어집에 없는 경우만)
-    try:
-        translated = translate_with_deepl(color, api_key, target_lang)
-        return translated if translated else color
-    except:
-        return color
+# 용어집 기반 번역은 제거하고 DeepL 배치 번역만 사용
+# 필요시 후처리에서 명확한 오역만 수정하는 방식으로 변경
 
-async def translate_option_column_batch(df: pd.DataFrame, api_key: str, batch_size: int = 5) -> pd.DataFrame:
-    """옵션 컬럼 배치 번역 (비동기)"""
-    option_columns = [col for col in df.columns if '옵션입력' in col]
+async def translate_option_column_batch(df: pd.DataFrame, target_column: str, api_key: str, 
+                                      batch_size: int = 5, use_async: bool = True) -> List[str]:
+    """
+    옵션 컬럼 배치 번역 (상품명 번역과 동일한 방식 적용) - 세분화된 진행률 표시
+    
+    Args:
+        df: 데이터프레임
+        target_column: 번역할 컬럼명
+        api_key: DeepL API 키
+        batch_size: 배치 크기
+        use_async: 비동기 사용 여부
+    
+    Returns:
+        번역된 텍스트 리스트
+    """
+    if target_column not in df.columns:
+        st.error(f"컬럼 '{target_column}'이 존재하지 않습니다.")
+        return []
+    
+    texts = df[target_column].fillna("").astype(str).tolist()
+    total_rows = len(texts)
+    
+    # 진행률 표시를 위한 컨테이너 생성
+    progress_container = st.container()
+    with progress_container:
+        st.write(f"📊 **옵션 번역 진행상황** - 컬럼: `{target_column}`")
+        
+        # 전체 진행률 바
+        overall_progress = st.progress(0)
+        overall_status = st.empty()
+        
+        # 세부 진행률 정보
+        detail_col1, detail_col2, detail_col3 = st.columns(3)
+        with detail_col1:
+            parsing_status = st.empty()
+        with detail_col2:
+            translation_status = st.empty()
+        with detail_col3:
+            reconstruction_status = st.empty()
+    
+    # 1단계: 옵션 형식 파싱 및 분석
+    overall_status.text("1/3 단계: 옵션 형식 분석 중...")
+    parsing_status.text("🔍 파싱 중...")
+    
+    option_texts = []
+    option_indices = []
+    result_texts = [""] * len(texts)
+    option_count = 0
+    non_option_count = 0
+    
+    for i, text in enumerate(texts):
+        if is_option_format(text):
+            # 옵션 형식인 경우: 색상명들만 추출하여 번역 대상에 추가
+            extracted = extract_option_colors(text)
+            if extracted:
+                option_texts.extend(extracted['colors'])
+                option_indices.append((i, len(extracted['colors']), extracted['prefix']))
+                option_count += 1
+            else:
+                result_texts[i] = text  # 파싱 실패시 원본 유지
+                non_option_count += 1
+        else:
+            result_texts[i] = text  # 옵션 형식이 아니면 원본 유지
+            non_option_count += 1
+        
+        # 파싱 진행률 업데이트 (10%씩)
+        if (i + 1) % max(1, total_rows // 10) == 0 or i == total_rows - 1:
+            progress = (i + 1) / total_rows * 0.2  # 전체의 20%
+            overall_progress.progress(progress)
+            parsing_status.text(f"🔍 파싱: {i + 1}/{total_rows}")
+    
+    # 파싱 결과 요약
+    unique_colors = len(set(option_texts))
+    parsing_status.text(f"✅ 파싱 완료: 옵션 {option_count}개, 일반 {non_option_count}개")
+    
+    # 2단계: 색상명 배치 번역
+    if option_texts:
+        overall_status.text(f"2/3 단계: 색상명 번역 중... ({len(option_texts)}개 색상, {unique_colors}개 고유)")
+        translation_status.text(f"🌐 번역 대기: {len(option_texts)}개")
+        
+        try:
+            import asyncio
+            from .translate_simplified import translate_batch_async_with_deepl, translate_batch_with_deepl
+            
+            # 번역 시작 전 진행률 업데이트
+            overall_progress.progress(0.3)
+            translation_status.text(f"🌐 번역 시작: {len(option_texts)}개 색상")
+            
+            if use_async:
+                # 단순하게 기존 함수 사용 (중복 메시지 방지)
+                translated_colors = await translate_batch_async_with_deepl(
+                    option_texts, api_key, batch_size=batch_size
+                )
+                
+            else:
+                # 동기 방식은 기존과 동일
+                translated_colors = translate_batch_with_deepl(
+                    option_texts, api_key, batch_size=batch_size
+                )
+            
+            # 번역 완료 후 진행률 업데이트
+            overall_progress.progress(0.7)
+            translation_status.text(f"✅ 번역 완료: {len(translated_colors)}/{len(option_texts)}")
+            
+            # 3단계: 옵션 형식으로 재구성
+            overall_status.text("3/3 단계: 옵션 형식 재구성 중...")
+            reconstruction_status.text("🔧 재구성 중...")
+            
+            color_index = 0
+            success_count = 0
+            fail_count = 0
+            
+            for idx, (original_index, color_count, prefix) in enumerate(option_indices):
+                try:
+                    # 해당 옵션의 번역된 색상들 추출
+                    translated_option_colors = translated_colors[color_index:color_index + color_count]
+                    color_index += color_count
+                    
+                    # 옵션 텍스트 재구성
+                    if len(translated_option_colors) == color_count:
+                        result_texts[original_index] = reconstruct_option_text(prefix, translated_option_colors)
+                        success_count += 1
+                    else:
+                        # 번역 실패시 원본 유지
+                        result_texts[original_index] = texts[original_index]
+                        fail_count += 1
+                        if fail_count <= 3:  # 처음 3개만 경고 표시
+                            st.warning(f"옵션 번역 불완전 (행 {original_index + 1}): 원본 유지")
+                        
+                except Exception as e:
+                    result_texts[original_index] = texts[original_index]
+                    fail_count += 1
+                    if fail_count <= 3:  # 처음 3개만 에러 표시
+                        st.error(f"옵션 재구성 오류 (행 {original_index + 1}): {str(e)}")
+                
+                # 재구성 진행률 업데이트
+                if (idx + 1) % max(1, len(option_indices) // 5) == 0 or idx == len(option_indices) - 1:
+                    progress = 0.7 + (idx + 1) / len(option_indices) * 0.3
+                    overall_progress.progress(progress)
+                    reconstruction_status.text(f"🔧 재구성: {idx + 1}/{len(option_indices)}")
+            
+            # 최종 결과 표시
+            overall_progress.progress(1.0)
+            overall_status.text("✅ 번역 완료!")
+            reconstruction_status.text(f"✅ 성공: {success_count}개, 실패: {fail_count}개")
+            
+            # 실패가 많은 경우 추가 정보 표시
+            if fail_count > 3:
+                st.info(f"총 {fail_count}개 옵션에서 번역 문제가 발생했습니다. (처음 3개만 표시)")
+                    
+        except Exception as e:
+            overall_progress.progress(0.3)
+            st.error(f"배치 번역 오류: {str(e)}")
+            translation_status.text("❌ 번역 실패")
+            reconstruction_status.text("⏭️ 원본 유지")
+            
+            # 전체 번역 실패시 원본 텍스트들로 복원
+            for original_index, _, _ in option_indices:
+                result_texts[original_index] = texts[original_index]
+    else:
+        # 번역할 옵션이 없는 경우
+        overall_progress.progress(1.0)
+        overall_status.text("✅ 완료 (번역할 옵션 없음)")
+        translation_status.text("⏭️ 번역 불필요")
+        reconstruction_status.text("⏭️ 재구성 불필요")
+    
+    return result_texts
+
+def analyze_colors_in_data(df: pd.DataFrame) -> Dict[str, any]:
+    """
+    데이터프레임에서 색상 정보를 분석하는 함수
+    
+    Args:
+        df: 분석할 데이터프레임
+    
+    Returns:
+        색상 분석 결과 딕셔너리
+    """
+    if df is None or df.empty:
+        return {"total_colors": 0, "unique_colors": [], "color_frequency": {}}
+    
+    option_columns = [col for col in df.columns if '옵션' in col or 'option' in col.lower()]
+    all_colors = []
+    
     for col in option_columns:
-        texts = df[col].fillna("").astype(str).tolist()
-        translated_texts = await translate_batch_async_with_deepl(texts, api_key, batch_size=batch_size)
-        df[col] = translated_texts
-    return df
+        for value in df[col].fillna("").astype(str):
+            if is_option_format(value):
+                extracted = extract_option_colors(value)
+                if extracted:
+                    all_colors.extend(extracted['colors'])
+    
+    # 색상 빈도 계산
+    color_frequency = {}
+    for color in all_colors:
+        color_frequency[color] = color_frequency.get(color, 0) + 1
+    
+    return {
+        "total_colors": len(all_colors),
+        "unique_colors": list(set(all_colors)),
+        "color_frequency": color_frequency,
+        "most_common": sorted(color_frequency.items(), key=lambda x: x[1], reverse=True)[:10]
+    }
 
-def is_option_format(text: str) -> bool:
+def suggest_glossary_additions(color_analysis: Dict[str, any]) -> List[str]:
     """
-    텍스트가 옵션 형식인지 확인하는 함수
+    색상 분석 결과를 바탕으로 번역 검토 제안 (용어집 대신 후처리용)
     
     Args:
-        text: 확인할 텍스트
+        color_analysis: analyze_colors_in_data 결과
     
     Returns:
-        True if 옵션 형식, False otherwise
+        번역 검토가 필요한 색상명 리스트
     """
-    if not text or not isinstance(text, str):
-        return False
+    if not color_analysis or not color_analysis.get("unique_colors"):
+        return []
     
-    pattern = r'^색상\{[^}]+\}$'
-    return bool(re.match(pattern, text.strip()))
+    # 빈도가 높은 색상들을 우선적으로 검토 제안
+    most_common = color_analysis.get("most_common", [])
+    suggestions = [color for color, freq in most_common if freq >= 5]  # 5회 이상 등장하는 색상
+    
+    return suggestions[:20]  # 상위 20개만 제안
 
-def validate_option_translation(original: str, translated: str) -> bool:
+def export_color_analysis_to_excel(color_analysis: Dict[str, any], filename: str = "color_analysis.xlsx") -> bytes:
     """
-    옵션 번역 결과를 검증하는 함수
+    색상 분석 결과를 엑셀 파일로 내보내기
     
     Args:
-        original: 원본 옵션 텍스트
-        translated: 번역된 옵션 텍스트
+        color_analysis: 색상 분석 결과
+        filename: 파일명
     
     Returns:
-        True if 번역이 올바름, False otherwise
+        엑셀 파일 바이트 데이터
     """
-    original_extracted = extract_option_colors(original)
-    translated_extracted = extract_option_colors(translated)
+    if not color_analysis:
+        return b""
     
-    if not original_extracted or not translated_extracted:
-        return False
+    # 엑셀 파일 생성
+    output = io.BytesIO()
     
-    # 색상 개수가 같은지 확인
-    return len(original_extracted['colors']) == len(translated_extracted['colors'])
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # 색상 빈도 시트
+        if color_analysis.get("color_frequency"):
+            freq_df = pd.DataFrame(
+                list(color_analysis["color_frequency"].items()),
+                columns=["색상명", "빈도"]
+            ).sort_values("빈도", ascending=False)
+            freq_df.to_excel(writer, sheet_name="색상빈도", index=False)
+        
+        # 고유 색상 시트
+        if color_analysis.get("unique_colors"):
+            unique_df = pd.DataFrame(
+                color_analysis["unique_colors"],
+                columns=["고유색상"]
+            )
+            unique_df.to_excel(writer, sheet_name="고유색상", index=False)
+        
+        # 요약 정보 시트
+        summary_df = pd.DataFrame([
+            ["총 색상 수", color_analysis.get("total_colors", 0)],
+            ["고유 색상 수", len(color_analysis.get("unique_colors", []))]
+        ], columns=["항목", "값"])
+        summary_df.to_excel(writer, sheet_name="요약", index=False)
+    
+    output.seek(0)
+    return output.getvalue()
 
 # 사용 예시 및 테스트 함수
 def test_option_translation():

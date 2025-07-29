@@ -591,7 +591,7 @@ def translate_option_column(df, column_name: str, api_key: str, target_lang: str
     df[column_name] = df[column_name].apply(translate_option_row)
     return df
 
-async def translate_option_column_batch(df, target_column: str, api_key: str, 
+async def translate_option_column_batch_old(df, target_column: str, api_key: str, 
                                       batch_size: int = 5, use_async: bool = True):
     """옵션 컬럼 배치 번역 (상품명 번역과 동일한 방식)"""
     
