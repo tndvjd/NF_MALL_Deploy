@@ -528,6 +528,106 @@ with tab6:
     """)
 
     # 이전 단계 결과 파일 자동 로드
+    if st.session_state.processed_data is not None and st.session_state.last_processed_file == "step_5_result.xlsx":
+        st.info("이전 단계의 결과 파일이 자동으로 로드되었습니다.")
+        df = st.session_state.processed_data
+    else:
+        uploaded_file = st.file_uploader("엑셀 파일을 업로드하세요", type=['xlsx'], key="translator_6")
+        if uploaded_file:
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
+
+    if 'df' in locals():
+        auth_key = st.text_input("DeepL API 키를 입력하세요", type="password", key="deepl_key_6")
+        
+        # 상품명 컬럼 확인
+        if "상품명" not in df.columns:
+            st.error("상품명 컬럼을 찾을 수 없습니다.")
+            st.stop()
+
+        batch_size = st.select_slider(
+            "배치 크기를 선택하세요 (큰 값 = 빠른 처리, 작은 값 = 안정적인 처리)",
+            options=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            value=5,
+            key="batch_size_6"
+        )
+
+        if st.button("번역 시작", key="translation_start_6"):
+            if not auth_key:
+                st.warning("⚠️ DeepL API 키를 입력해주세요.")
+            else:
+                # API 키 검증 기능 제거됨 (사용자 요청)
+                
+                # 다단계 진행률 표시
+                steps = create_processing_steps(["번역 처리", "결과 정리"])
+                multi_progress = MultiStepProgress(steps)
+                
+                try:
+                    multi_progress.start_step(0)
+                    
+                    # 상품명 번역 실행 (비동기)
+                    translated_texts = asyncio.run(translate_product_names(
+                        df=df,
+                        target_column="상품명",
+                        api_key=auth_key,
+                        batch_size=batch_size,
+                        use_async=True
+                    ))
+                    df["상품명"] = translated_texts
+                    
+                    multi_progress.complete_step()
+                    multi_progress.start_step(1)
+                    
+                    # 결과 저장
+                    buffer = save_processed_data(df, 6)
+                    
+                    # 메모리 정리
+                    gc.collect()
+                    multi_progress.complete_step()
+                    multi_progress.complete_all("번역이 완료되었습니다!")
+                        
+                    # 결과 미리보기
+                    st.subheader("번역 결과 미리보기")
+                    st.dataframe(df["상품명"].head(), use_container_width=True)
+
+                    st.download_button(
+                        label="📥 번역 완료 파일 다운로드",
+                        data=buffer.getvalue(),
+                        file_name="translated_products.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_6"
+                    )
+                        
+                except Exception as e:
+                    st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
+
+# 7단계: 옵션 번역 탭
+with tab7:
+    st.header("옵션 번역")
+    
+    st.markdown("""
+    ### 📝 사용 방법
+    1. 옵션 형식이 변환된 엑셀 파일을 업로드하세요
+    2. DeepL API 키를 입력하세요 ([API 키 발급받기](https://www.deepl.com/ko/pro-api))
+    3. 번역할 옵션 컬럼을 선택하세요
+    4. '옵션 번역 시작' 버튼을 클릭하세요
+    
+    ### 번역 예시
+    - 번역 전: "색상{화이트|블랙|브라운}"
+    - 번역 후: "색상{ホワイト|ブラック|ブラウン}"
+    
+    ### 🎯 개선된 번역 시스템
+    - **용어집 우선**: 100+ 색상 용어를 정확하게 번역
+    - **복합 색상 지원**: "크림화이트" → "クリームホワイト"
+    - **목재 색상 완벽 지원**: "오크", "메이플", "아카시아" 등
+    - **API 절약**: 용어집 매칭 시 API 사용 안함 (41% 절약)
+    
+    ### ⚠️ 주의사항
+    - 옵션 형식(색상{...})으로 변환된 데이터만 번역됩니다
+    - DeepL API 키가 필요합니다 (용어집에 없는 색상만)
+    - 용어집에 없는 특수 색상은 DeepL로 번역됩니다
+    """)
+
+    # 이전 단계 결과 파일 자동 로드
     if st.session_state.processed_data is not None and st.session_state.last_processed_file == "step_6_result.xlsx":
         st.info("이전 단계의 결과 파일이 자동으로 로드되었습니다.")
         df = st.session_state.processed_data
@@ -596,106 +696,6 @@ with tab6:
                 st.warning("옵션 관련 컬럼을 찾을 수 없습니다.")
         else:
             st.warning("DeepL API 키를 입력해주세요.")
-
-# 7단계: 옵션 번역 탭
-with tab7:
-    st.header("옵션 번역")
-    
-    st.markdown("""
-    ### 📝 사용 방법
-    1. 옵션 형식이 변환된 엑셀 파일을 업로드하세요
-    2. DeepL API 키를 입력하세요 ([API 키 발급받기](https://www.deepl.com/ko/pro-api))
-    3. 번역할 옵션 컬럼을 선택하세요
-    4. '옵션 번역 시작' 버튼을 클릭하세요
-    
-    ### 번역 예시
-    - 번역 전: "색상{화이트|블랙|브라운}"
-    - 번역 후: "색상{ホワイト|ブラック|ブラウン}"
-    
-    ### 🎯 개선된 번역 시스템
-    - **용어집 우선**: 100+ 색상 용어를 정확하게 번역
-    - **복합 색상 지원**: "크림화이트" → "クリームホワイト"
-    - **목재 색상 완벽 지원**: "오크", "메이플", "아카시아" 등
-    - **API 절약**: 용어집 매칭 시 API 사용 안함 (41% 절약)
-    
-    ### ⚠️ 주의사항
-    - 옵션 형식(색상{...})으로 변환된 데이터만 번역됩니다
-    - DeepL API 키가 필요합니다 (용어집에 없는 색상만)
-    - 용어집에 없는 특수 색상은 DeepL로 번역됩니다
-    """)
-
-    # 이전 단계 결과 파일 자동 로드
-    if st.session_state.processed_data is not None and st.session_state.last_processed_file == "step_5_result.xlsx":
-        st.info("이전 단계의 결과 파일이 자동으로 로드되었습니다.")
-        df = st.session_state.processed_data
-    else:
-        uploaded_file = st.file_uploader("엑셀 파일을 업로드하세요", type=['xlsx'], key="translator_6")
-        if uploaded_file:
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
-
-    if 'df' in locals():
-        auth_key = st.text_input("DeepL API 키를 입력하세요", type="password", key="deepl_key_6")
-        
-        # 상품명 컬럼 확인
-        if "상품명" not in df.columns:
-            st.error("상품명 컬럼을 찾을 수 없습니다.")
-            st.stop()
-
-        batch_size = st.select_slider(
-            "배치 크기를 선택하세요 (큰 값 = 빠른 처리, 작은 값 = 안정적인 처리)",
-            options=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-            value=5,
-            key="batch_size_6"
-        )
-
-        if st.button("번역 시작", key="translation_start_7"):
-            if not auth_key:
-                st.warning("⚠️ DeepL API 키를 입력해주세요.")
-            else:
-                # API 키 검증 기능 제거됨 (사용자 요청)
-                
-                # 다단계 진행률 표시
-                steps = create_processing_steps(["번역 처리", "결과 정리"])
-                multi_progress = MultiStepProgress(steps)
-                
-                try:
-                    multi_progress.start_step(0)
-                    
-                    # 상품명 번역 실행 (비동기)
-                    translated_texts = asyncio.run(translate_product_names(
-                        df=df,
-                        target_column="상품명",
-                        api_key=auth_key,
-                        batch_size=batch_size,
-                        use_async=True
-                    ))
-                    df["상품명"] = translated_texts
-                    
-                    multi_progress.complete_step()
-                    multi_progress.start_step(1)
-                    
-                    # 결과 저장
-                    buffer = save_processed_data(df, 6)
-                    
-                    # 메모리 정리
-                    gc.collect()
-                    multi_progress.complete_step()
-                    multi_progress.complete_all("번역이 완료되었습니다!")
-                        
-                    # 결과 미리보기
-                    st.subheader("번역 결과 미리보기")
-                    st.dataframe(df["상품명"].head(), use_container_width=True)
-
-                    st.download_button(
-                        label="📥 번역 완료 파일 다운로드",
-                        data=buffer.getvalue(),
-                        file_name="translated_products.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="download_6"
-                    )
-                        
-                except Exception as e:
-                    st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
 
 # 8단계: 청크 다운로드 탭
 with tab8:
