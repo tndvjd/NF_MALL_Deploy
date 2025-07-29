@@ -106,7 +106,7 @@ def save_processed_data(df, step):
     return buffer
 
 # 탭 생성
-tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📚 사용설명서",
     "1️⃣ 엑셀 파일 업로드",
     "2️⃣ 가격 정보 처리",
@@ -115,7 +115,6 @@ tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "5️⃣ 옵션 형식 변환",
     "6️⃣ 상품명 번역",
     "7️⃣ 옵션 번역",
-    "🚀 통합 번역",
     "8️⃣ 청크 다운로드"
 ])
 
